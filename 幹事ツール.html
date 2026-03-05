@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>飲み会精算（かんたん版）</title>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#fff; --text:#111827; --muted:#6b7280;
+    --accent:#2563eb; --danger:#ef4444; --dark:#111827; --line:#e5e7eb;
+    --radius:14px; --shadow:0 10px 22px rgba(0,0,0,.08);
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo;background:var(--bg);margin:0;padding:16px;color:var(--text)}
+  .container{max-width:860px;margin:auto}
+  .header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .title{font-size:20px;margin:0}
+  .sub{color:var(--muted);margin:6px 0 0}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);margin-bottom:12px}
+  h2{font-size:15px;margin:0 0 10px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
+  input, textarea, select{
+    width:100%; box-sizing:border-box;
+    border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+    font-size:14px; background:#fff;
+  }
+  textarea{min-height:90px; resize:vertical}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .col{flex:1;min-width:210px}
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    border:none; border-radius:10px; padding:10px 12px;
+    background:var(--accent); color:#fff; font-weight:700;
+    cursor:pointer; text-decoration:none; user-select:none;
+  }
+  .btn.dark{background:var(--dark)}
+  .btn.paypay{background:var(--danger)}
+  .btn.ghost{background:#fff;color:var(--text);border:1px solid var(--line)}
+  .btn:active{transform:translateY(1px)}
+  .pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:4px 10px;border-radius:999px;font-size:12px}
+  .hint{color:var(--muted);font-size:12px;line-height:1.5}
+  .big{font-size:22px;font-weight:900;margin:4px 0 0}
+  .sep{height:1px;background:var(--line);margin:12px 0}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border-bottom:1px solid var(--line);padding:8px 6px;font-size:13px;text-align:left;vertical-align:middle}
+  th{color:var(--muted);font-weight:800}
+  .badge{display:inline-block;background:#ecfdf5;color:#065f46;padding:4px 10px;border-radius:999px;font-size:12px}
+  .warn{background:#fff7ed;color:#9a3412}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+</style>
+
+<script>
+/* ==========================
+   ✅ ここだけ編集（後輩向け）
+   ========================== */
+const CONFIG = {
+  displayName: "タナカコウダイ",
+  paypayLink: "https://qr.paypay.ne.jp/p2p01_xcCXWaAaAYSLU97Z",
+  rakuten: { bankName:"楽天銀行", branchName:"タクト支店", branchCode:"224", accountType:"普通", accountNo:"4272609", holder:"タナカコウダイ" },
+  mufg:   { bankName:"三菱UFJ銀行", branchName:"名古屋営業部", branchCode:"150", accountType:"普通", accountNo:"1027194", holder:"タナカコウダイ" },
+  defaultRoundUnit: 100,
+  defaultRoundMode: "ceil", // ceil / round / floor
+  defaultTiers: [
+    { name:"上司", weight:1.5 },
+    { name:"同僚", weight:1.0 },
+    { name:"後輩", weight:0.7 },
+  ]
+};
+/* ========================== */
+
+const LS_KEY="nomikai_easy_v1";
+const el = (id)=>document.getElementById(id);
+const toInt = (v)=>{ const n=parseInt(String(v).replace(/[^\d\-]/g,""),10); return isNaN(n)?0:n; };
+const toFloat = (v)=>{ const n=parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isNaN(n)?0:n; };
+const fmt = (n)=>Number(n||0).toLocaleString("ja-JP");
+const clamp = (n,min)=>Math.max(min,n);
+const roundBy = (n, unit, mode)=>{
+  unit = clamp(toInt(unit), 1);
+  const x = n / unit;
+  let y = x;
+  if (mode==="ceil") y=Math.ceil(x);
+  else if (mode==="floor") y=Math.floor(x);
+  else y=Math.round(x);
+  return y*unit;
+};
+const roundingJP = (m)=> m==="ceil"?"切上げ":m==="floor"?"切捨て":"四捨五入";
+
+function copyText(t){ navigator.clipboard.writeText(t); alert("コピーしました"); }
+function bankLine(b){ return `${b.bankName} ${b.branchName}(${b.branchCode}) ${b.accountType} ${b.accountNo} ${b.holder}`; }
+
+function initPay(){
+  el("displayName").textContent = CONFIG.displayName;
+
+  const pp = el("paypayBtn");
+  pp.href = CONFIG.paypayLink || "#";
+  pp.style.opacity = CONFIG.paypayLink ? "1":".4";
+  pp.style.pointerEvents = CONFIG.paypayLink ? "auto":"none";
+
+  el("r_copy").onclick = ()=>copyText(bankLine(CONFIG.rakuten));
+  el("u_copy").onclick = ()=>copyText(bankLine(CONFIG.mufg));
+  el("copyMsg").onclick = ()=>copyText(el("msg").value);
+
+  el("r_text").textContent = bankLine(CONFIG.rakuten);
+  el("u_text").textContent = bankLine(CONFIG.mufg);
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return false;
+    const s = JSON.parse(raw);
+
+    el("total").value = s.total ?? "";
+    el("roundUnit").value = s.roundUnit ?? String(CONFIG.defaultRoundUnit);
+    el("roundMode").value = s.roundMode ?? CONFIG.defaultRoundMode;
+    el("mode").value = s.mode ?? "equal";
+
+    // easy counts
+    el("attend").value = s.attend ?? "";
+    el("payCount").value = s.payCount ?? "";
+
+    // tiers counts
+    renderTierCounts((s.tierCounts && s.tierCounts.length)? s.tierCounts : CONFIG.defaultTiers.map(t=>({...t,count:0})));
+
+    // roster
+    el("names").value = s.names ?? "";
+    el("useRoster").checked = !!s.useRoster;
+
+    return true;
+  }catch(e){ return false; }
+}
+
+function saveState(){
+  const tierCounts = getTierCounts();
+  const s = {
+    total: el("total").value,
+    roundUnit: el("roundUnit").value,
+    roundMode: el("roundMode").value,
+    mode: el("mode").value,
+    attend: el("attend").value,
+    payCount: el("payCount").value,
+    tierCounts,
+    names: el("names").value,
+    useRoster: el("useRoster").checked
+  };
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(s)); }catch(e){}
+}
+
+/* ===== かんたん：人数の同期 ===== */
+function applyNamesToCounts(){
+  // 名簿から参加人数と支払人数を反映（支払対象の指定を簡単にしたいので、末尾に「×」で除外できる）
+  // 例：
+  // 田中
+  // 鈴木
+  // 佐藤×   ←支払対象外
+  const raw = el("names").value.trim();
+  if(!raw){
+    el("attend").value = "";
+    el("payCount").value = "";
+    return;
+  }
+  const lines = raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const attend = lines.length;
+  const pay = lines.filter(x=>!x.endsWith("×") && !x.endsWith("x") && !x.endsWith("X")).length;
+  el("attend").value = String(attend);
+  el("payCount").value = String(pay);
+}
+
+/* ===== ランク人数（名簿なしでも傾斜可） ===== */
+function renderTierCounts(list){
+  const tbody = el("tierBody");
+  tbody.innerHTML = "";
+  list.forEach((t, i)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input data-k="name" data-i="${i}" value="${escapeHtml(t.name)}"></td>
+      <td style="width:120px"><input data-k="count" data-i="${i}" inputmode="numeric" value="${t.count ?? 0}"></td>
+      <td style="width:120px"><input data-k="weight" data-i="${i}" inputmode="decimal" value="${t.weight ?? 1}"></td>
+      <td class="mono" id="tierPay_${i}">—</td>
+      <td style="width:90px"><button class="btn ghost" data-del="${i}" type="button">削除</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll("input").forEach(inp=>{
+    inp.addEventListener("input", ()=>{ syncPayCountFromTier(); compute(); });
+  });
+  tbody.querySelectorAll("button[data-del]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const idx = toInt(btn.getAttribute("data-del"));
+      const cur = getTierCounts();
+      cur.splice(idx,1);
+      renderTierCounts(cur);
+      syncPayCountFromTier();
+      compute();
+    });
+  });
+}
+
+function escapeHtml(s){
+  return String(s??"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function getTierCounts(){
+  const rows = Array.from(el("tierBody").querySelectorAll("tr"));
+  return rows.map((tr, idx)=>{
+    const name = tr.querySelector('input[data-k="name"]').value.trim() || `ランク${idx+1}`;
+    const count = clamp(toInt(tr.querySelector('input[data-k="count"]').value), 0);
+    const weight = clamp(toFloat(tr.querySelector('input[data-k="weight"]').value), 0);
+    return {name, count, weight};
+  });
+}
+
+function addTierRow(){
+  const cur = getTierCounts();
+  cur.push({name:"", count:0, weight:1.0});
+  renderTierCounts(cur);
+  compute();
+}
+
+function syncPayCountFromTier(){
+  // 傾斜割りのとき、ランク人数の合計を支払人数に反映（手入力より速い）
+  if (el("mode").value !== "tier") return;
+  const sum = getTierCounts().reduce((a,t)=>a+(t.count||0),0);
+  if (sum>0) el("payCount").value = String(sum);
+}
+
+/* ===== メイン計算 ===== */
+function compute(){
+  const total = clamp(toInt(el("total").value), 0);
+  const attend = clamp(toInt(el("attend").value), 0);
+  const payCount = clamp(toInt(el("payCount").value), 0);
+
+  const unit = clamp(toInt(el("roundUnit").value), 1);
+  const rmode = el("roundMode").value;
+  const mode = el("mode").value; // equal / tier
+
+  // KPI
+  el("k_total").textContent = `${fmt(total)}円`;
+  el("k_attend").textContent = `${fmt(attend)}人`;
+  el("k_pay").textContent = `${fmt(payCount)}人`;
+
+  let collected = 0;
+  let diff = 0;
+  let line = "";
+  let perBase = 0;
+
+  if(total===0 || payCount===0){
+    el("one").textContent = "—";
+    el("k_collect").textContent = "0円";
+    el("k_diff").textContent = "0円";
+    el("msg").value = buildMessage(total, attend, payCount, unit, rmode, mode, [], 0, 0);
+    saveState();
+    return;
+  }
+
+  if(mode === "equal"){
+    const per = total / payCount;
+    const perRounded = roundBy(per, unit, rmode);
+    collected = perRounded * payCount;
+    diff = collected - total;
+    el("one").textContent = `${fmt(perRounded)}円`;
+    line = `【均等割り】支払人数${payCount}人 / 1人 ${fmt(perRounded)}円（${fmt(unit)}円・${roundingJP(rmode)}）`;
+
+    // tier表示をクリア
+    updateTierPays([]);
+    el("tierArea").style.display = "none";
+  }else{
+    el("tierArea").style.display = "block";
+    const tiers = getTierCounts();
+    const weightSum = tiers.reduce((a,t)=>a+(t.count||0)*(t.weight||0),0);
+    const base = weightSum>0 ? total / weightSum : 0;
+    perBase = roundBy(base, unit, rmode);
+
+    const tierPays = tiers.map(t=>{
+      const raw = base * (t.weight||0);
+      const payPer = (t.count>0 && t.weight>0) ? roundBy(raw, unit, rmode) : 0;
+      return {...t, payPer};
+    });
+    collected = tierPays.reduce((a,t)=>a+(t.count||0)*(t.payPer||0),0);
+    diff = collected - total;
+
+    // “重み1.0”の目安を表示（地味に助かる）
+    el("one").textContent = `${fmt(perBase)}円（重み1.0目安）`;
+    line = `【傾斜割り】重み1.0目安 ${fmt(perBase)}円（${fmt(unit)}円・${roundingJP(rmode)}）`;
+
+    updateTierPays(tierPays);
+  }
+
+  el("k_collect").textContent = `${fmt(collected)}円`;
+  el("k_diff").textContent = `${diff>=0?"+":""}${fmt(diff)}円`;
+
+  const tiersForMsg = (mode==="tier") ? updateTierListForMsg() : [];
+  el("msg").value = buildMessage(total, attend, payCount, unit, rmode, mode, tiersForMsg, collected, diff, line);
+
+  saveState();
+}
+
+function updateTierPays(tierPays){
+  const rows = Array.from(el("tierBody").querySelectorAll("tr"));
+  rows.forEach((tr, idx)=>{
+    const cell = tr.querySelector(`#tierPay_${idx}`);
+    if(!cell) return;
+    const t = tierPays[idx];
+    cell.textContent = t && t.count>0 ? `${fmt(t.payPer)}円` : "—";
+  });
+}
+
+function updateTierListForMsg(){
+  const tiers = getTierCounts();
+  // payPerまで必要なら再計算して返す
+  const total = clamp(toInt(el("total").value), 0);
+  const unit = clamp(toInt(el("roundUnit").value), 1);
+  const rmode = el("roundMode").value;
+  const weightSum = tiers.reduce((a,t)=>a+(t.count||0)*(t.weight||0),0);
+  const base = weightSum>0 ? total/weightSum : 0;
+  return tiers.map(t=>{
+    const raw = base*(t.weight||0);
+    const payPer = (t.count>0 && t.weight>0) ? roundBy(raw, unit, rmode) : 0;
+    return {...t, payPer};
+  });
+}
+
+function buildMessage(total, attend, payCount, unit, rmode, mode, tierPays, collected, diff, headerLine=""){
+  let s = `【飲み会精算】\n名義：${CONFIG.displayName}\n合計：${fmt(total)}円\n参加：${fmt(attend)}人 / 支払：${fmt(payCount)}人\n端数：${fmt(unit)}円・${roundingJP(rmode)}\n`;
+  if(headerLine) s += `\n${headerLine}\n`;
+  if(mode==="tier" && tierPays.length){
+    s += `\n【ランク別】\n`;
+    tierPays.forEach(t=>{
+      if((t.count||0)>0){
+        s += `${t.name}：${fmt(t.payPer)}円 × ${t.count}人（重み${t.weight}）\n`;
+      }
+    });
+  }else{
+    // equalはone表示から分かるので省略OK
+  }
+  s += `\n集金見込み：${fmt(collected)}円 / 差額：${diff>=0?"+":""}${fmt(diff)}円\n`;
+
+  if(CONFIG.paypayLink) s += `\nPayPay：${CONFIG.paypayLink}\n`;
+  s += `\n振込（楽天）：${bankLine(CONFIG.rakuten)}\n`;
+  s += `振込（UFJ）：${bankLine(CONFIG.mufg)}\n`;
+  return s;
+}
+
+/* ===== UI導線：かんたん/名簿 ===== */
+function onToggleRoster(){
+  const use = el("useRoster").checked;
+  el("rosterArea").style.display = use ? "block":"none";
+  if(use){
+    applyNamesToCounts(); // 名簿があれば人数自動
+  }
+  compute();
+}
+
+function computeAndSave(){ compute(); saveState(); }
+
+/* ===== 起動 ===== */
+window.addEventListener("DOMContentLoaded", ()=>{
+  initPay();
+
+  // 初期値
+  el("roundUnit").value = String(CONFIG.defaultRoundUnit);
+  el("roundMode").value = CONFIG.defaultRoundMode;
+  renderTierCounts(CONFIG.defaultTiers.map(t=>({...t, count:0})));
+
+  // 復元
+  const loaded = loadState();
+  if(!loaded){
+    el("mode").value = "equal";
+    el("useRoster").checked = false;
+  }
+  el("rosterArea").style.display = el("useRoster").checked ? "block":"none";
+  if(el("useRoster").checked) applyNamesToCounts();
+
+  // イベント
+  ["total","attend","payCount","roundUnit","roundMode","mode"].forEach(id=>{
+    el(id).addEventListener("input", computeAndSave);
+    el(id).addEventListener("change", computeAndSave);
+  });
+
+  el("useRoster").addEventListener("change", onToggleRoster);
+
+  el("names").addEventListener("input", ()=>{
+    if(el("useRoster").checked) applyNamesToCounts();
+    computeAndSave();
+  });
+
+  el("addTier").onclick = ()=>{ addTierRow(); };
+
+  el("syncFromNames").onclick = ()=>{
+    applyNamesToCounts();
+    computeAndSave();
+  };
+
+  el("reset").onclick = ()=>{
+    if(!confirm("リセットしますか？")) return;
+    localStorage.removeItem(LS_KEY);
+    el("total").value = "";
+    el("attend").value = "";
+    el("payCount").value = "";
+    el("mode").value = "equal";
+    el("roundUnit").value = String(CONFIG.defaultRoundUnit);
+    el("roundMode").value = CONFIG.defaultRoundMode;
+    el("useRoster").checked = false;
+    el("names").value = "";
+    renderTierCounts(CONFIG.defaultTiers.map(t=>({...t, count:0})));
+    onToggleRoster();
+    computeAndSave();
+  };
+
+  // tierモードなら payCount を tier人数合計に寄せる
+  el("mode").addEventListener("change", ()=>{
+    if(el("mode").value==="tier") syncPayCountFromTier();
+    computeAndSave();
+  });
+
+  compute();
+});
+</script>
+</head>
+
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1 class="title">飲み会精算（かんたん版）</h1>
+      <div class="sub">名義：<b id="displayName"></b>　<span class="pill">まず人数だけ → 必要なら名簿/傾斜</span></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="reset" type="button">リセット</button>
+      <button class="btn dark" id="copyMsg" type="button">LINE文コピー</button>
+    </div>
+  </div>
+
+  <!-- かんたん入力 -->
+  <div class="card">
+    <h2>① まずここだけでOK（最短）</h2>
+
+    <div class="row">
+      <div class="col">
+        <label>合計金額（円）</label>
+        <input id="total" inputmode="numeric" placeholder="例：48000">
+      </div>
+      <div class="col">
+        <label>参加人数（来た人数）</label>
+        <input id="attend" inputmode="numeric" placeholder="例：10">
+      </div>
+      <div class="col">
+        <label>支払人数（割る人数）</label>
+        <input id="payCount" inputmode="numeric" placeholder="例：7">
+        <div class="hint">※「10人参加 / 7人払い」みたいな時はここだけでOK</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>割り方</label>
+        <select id="mode">
+          <option value="equal">均等割り</option>
+          <option value="tier">傾斜割り（ランク）</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>端数単位（円）</label>
+        <select id="roundUnit">
+          <option value="1">1円</option>
+          <option value="10">10円</option>
+          <option value="100" selected>100円</option>
+          <option value="500">500円</option>
+          <option value="1000">1000円</option>
+        </select>
+      </div>
+      <div class="col">
+        <label>丸め方</label>
+        <select id="roundMode">
+          <option value="ceil">切上げ</option>
+          <option value="round">四捨五入</option>
+          <option value="floor">切捨て</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div class="hint">1人あたり</div>
+        <div class="big" id="one">—</div>
+      </div>
+      <div class="row">
+        <span class="badge">合計：<b id="k_total">0円</b></span>
+        <span class="badge">参加：<b id="k_attend">0人</b></span>
+        <span class="badge">支払：<b id="k_pay">0人</b></span>
+        <span class="badge">集金：<b id="k_collect">0円</b></span>
+        <span class="badge warn">差額：<b id="k_diff">0円</b></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 傾斜割り（必要な時だけ） -->
+  <div class="card" id="tierArea" style="display:none">
+    <h2>② 傾斜割り（ランク人数だけ入れればOK）</h2>
+    <div class="hint">名簿なしでも「上司2、同僚3、後輩5」みたいに人数入力だけで動く。</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ランク</th>
+          <th style="width:120px">人数</th>
+          <th style="width:120px">重み</th>
+          <th style="width:160px">1人あたり</th>
+          <th style="width:90px"></th>
+        </tr>
+      </thead>
+      <tbody id="tierBody"></tbody>
+    </table>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="addTier" type="button">ランク追加</button>
+      <span class="badge warn">※ランク人数合計が「支払人数」に自動反映されます</span>
+    </div>
+  </div>
+
+  <!-- 名簿（任意） -->
+  <div class="card">
+    <h2>③ 名簿（必要なときだけON）</h2>
+    <label class="row" style="gap:8px">
+      <input type="checkbox" id="useRoster" style="width:auto">
+      <span>名簿を使う（貼り付けで人数自動）</span>
+    </label>
+
+    <div id="rosterArea" style="display:none">
+      <div class="hint">1行1名。支払対象外は末尾に「×」を付ける（例：佐藤×）。</div>
+      <label>名簿（貼り付け）</label>
+      <textarea id="names" placeholder="例：
+田中
+鈴木
+佐藤×"></textarea>
+      <div class="row">
+        <button class="btn ghost" id="syncFromNames" type="button">名簿から人数を反映</button>
+        <span class="badge">名簿から「参加人数」「支払人数」が自動で入ります</span>
+      </div>
+
+      <details style="margin-top:10px">
+        <summary>（後で）名簿から個別請求までやる機能も追加できます</summary>
+        <div class="hint" style="margin-top:8px">
+          今は「名簿→人数反映」を最速に寄せています。<br>
+          もし個別請求も欲しければ、次で“名簿→傾斜割り→個別金額→DM文生成”を軽いUIで足せます。
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- 送金 -->
+  <div class="card">
+    <h2>④ 振込（ボタン）</h2>
+    <div class="row">
+      <a class="btn paypay" id="paypayBtn" href="#" rel="noopener">PayPayで送る</a>
+      <button class="btn dark" id="r_copy" type="button">楽天コピー</button>
+      <button class="btn dark" id="u_copy" type="button">UFJコピー</button>
+    </div>
+    <div class="sep"></div>
+    <div class="hint"><b>楽天</b>：<span class="mono" id="r_text"></span></div>
+    <div class="hint"><b>UFJ</b>：<span class="mono" id="u_text"></span></div>
+  </div>
+
+  <!-- LINE文 -->
+  <div class="card">
+    <h2>⑤ LINE送信用（自動生成）</h2>
+    <textarea id="msg" readonly></textarea>
+    <div class="hint">上の「LINE文コピー」で一発コピー。</div>
+  </div>
+</div>
+</body>
+</html>
